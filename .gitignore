@@ -1,12 +1,58 @@
-output.txt 
-node_modules 
-dist 
-.mastra 
-.env.development 
-.env 
-*.db 
-*.db-* 
-.netlify 
-.vercel 
-*.duckdb 
-*.duckdb.wal 
+# Build output & deps
+output.txt
+node_modules
+dist
+.mastra
+.netlify
+.vercel
+
+# Env / secrets
+.env
+.env.development
+.env.*.local
+
+# Local DBs
+*.db
+*.db-*
+*.duckdb
+*.duckdb.wal
+
+# Logs
+*.log
+nest.err
+nest.log
+
+# ===== Agent / tool working dirs (not project source) =====
+.omo/
+.sisyphus/
+.playwright-mcp/
+.ruff_cache/
+plan/
+%TEMP%/
+
+# ===== Temp debug scripts & screenshots =====
+check-disk.ps1
+check-ubuntu.ps1
+check-wsl.ps1
+tmp_pg.ps1
+*.png
+
+# ===== OS / editor junk =====
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# ===== Lockfiles: pnpm-lock coexists with package-lock; ignore pnpm here =====
+pnpm-lock.yaml
+
+# ===== Stray config not wired into build =====
+tsconfig.json
+
+# ===== Other AI tooling projects pulled into the workspace =====
+stitch_heartfelt*/
+
+# ===== Project-local caches =====
+**/.ruff_cache/
+**/__pycache__/
+**/*.pyc

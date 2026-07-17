@@ -1,0 +1,300 @@
+openapi: 3.1.0
+info:
+  title: Heartfelt AI API
+  version: 0.1.0
+  description: |
+    论文查重 + AI 检测 + 降AI 改写 后台 API。
+
+    当前为 Phase 0 骨架阶段，仅 /health 系列端点可用。
+    业务端点（/papers, /detect-ai, /humanize 等）待 v1+ 实现。
+servers:
+  - url: http://localhost:3000/api/v1
+    description: Local development
+
+paths:
+  /health:
+    get:
+      tags: [health]
+      summary: Liveness probe
+      description: 后端进程存活检查
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Liveness'
+
+  /health/ready:
+    get:
+      tags: [health]
+      summary: Readiness probe
+      description: 依赖（DB + AI Service）可用性检查
+      responses:
+        '200':
+          description: ok or degraded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Readiness'
+
+# ===== 业务端点占位（v1+ 实现） =====
+  /papers/upload:
+    post:
+      tags: [papers]
+      summary: 上传论文 .docx
+      description: |
+        multipart/form-data 上传 .docx 文件。
+        后端解析文本算字符数，存 MinIO，建 papers 记录。
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: .docx 文件（≤ 50 MB）
+              required: [file]
+      responses:
+        '201':
+          description: 上传成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaperUploadResponse'
+        '400':
+          description: 缺少文件 / 格式不对 / 文件为空
+
+  /papers/{id}:
+    get:
+      tags: [papers]
+      summary: 查询单篇论文
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaperRecord'
+        '404':
+          description: 论文不存在
+
+  # /papers/{id}/check:
+  #   post:
+  #     tags: [papers]
+  #     summary: 触发查重 + AI 检测 + 降AI
+  # /detect-ai:
+  #   post:
+  #     tags: [ai-detection]
+  #     summary: 独立 AI 检测
+
+  /humanize:
+    post:
+      tags: [humanize]
+      summary: 降AI 改写
+      description: |
+        接收一段文本或已上传论文 ID,返回降AI 改写后的文本 + 对照 + 自检报告。
+        
+        三阶段流水线:分段 → 规则引擎预处理 → LLM 重写(Coder 推理模型) → 自检闭环。
+        
+        请求体二选一:
+        - text:直接传文本(50-50000 字)
+        - paperId:已上传论文 ID(后端从 DB + MinIO 取原文)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HumanizeRequest'
+      responses:
+        '200':
+          description: 改写成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanizeResponse'
+        '400':
+          description: text 和 paperId 都没传 / text 长度不符
+        '404':
+          description: paperId 不存在
+        '502':
+          description: kdoo.ai LLM 服务不可用/超时
+
+components:
+  schemas:
+    Liveness:
+      type: object
+      properties:
+        status: { type: string, enum: [ok] }
+        service: { type: string }
+        timestamp: { type: string, format: date-time }
+        uptime: { type: number }
+
+    Readiness:
+      type: object
+      properties:
+        status: { type: string, enum: [ok, degraded] }
+        service: { type: string }
+        timestamp: { type: string, format: date-time }
+        checks:
+          type: object
+          properties:
+            database: { $ref: '#/components/schemas/Check' }
+            ai_service: { $ref: '#/components/schemas/Check' }
+
+    Check:
+      type: object
+      properties:
+        status: { type: string, enum: [up, down] }
+        latency_ms: { type: number }
+        error: { type: string }
+
+    PaperUploadResponse:
+      type: object
+      properties:
+        paperId: { type: string, format: uuid }
+        charCount: { type: integer, description: 去空白后字符数 }
+      required: [paperId, charCount]
+
+    PaperRecord:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        userId: { type: string }
+        filename: { type: string }
+        charCount: { type: integer }
+        status: { type: string, enum: [pending, processing, done, failed] }
+        uploadedAt: { type: string, format: date-time }
+      required: [id, userId, filename, charCount, status, uploadedAt]
+
+    HumanizeRequest:
+      type: object
+      properties:
+        text:
+          type: string
+          minLength: 50
+          maxLength: 50000
+          description: 直接传文本(与 paperId 二选一,text 优先)
+        paperId:
+          type: string
+          format: uuid
+          description: 已上传论文 ID
+        scenario:
+          type: string
+          enum: [academic, blog, opinion]
+          default: academic
+          description: 场景,决定个性注入强度
+        maxRetries:
+          type: integer
+          minimum: 0
+          maximum: 3
+          default: 2
+          description: 自检最多重试轮数(不含初次)
+
+    HumanizeResponse:
+      type: object
+      properties:
+        rewrittenText:
+          type: string
+          description: 改写后的完整文本(所有段落拼回)
+        originalText:
+          type: string
+          description: 原文(用于前端 diff 展示)
+        paragraphs:
+          type: array
+          items:
+            $ref: '#/components/schemas/HumanizeParagraphResult'
+        summary:
+          $ref: '#/components/schemas/HumanizeSummary'
+        beforeAfter:
+          $ref: '#/components/schemas/HumanizeBeforeAfter'
+      required: [rewrittenText, originalText, paragraphs, summary, beforeAfter]
+
+    HumanizeParagraphResult:
+      type: object
+      properties:
+        index: { type: integer }
+        originalText: { type: string }
+        preprocessedText: { type: string }
+        rewrittenText: { type: string }
+        ruleHits:
+          type: array
+          items:
+            type: object
+            properties:
+              ruleId: { type: string }
+              count: { type: integer }
+              reason: { type: string }
+        flaggedPatterns:
+          type: array
+          items:
+            type: object
+            properties:
+              patternName: { type: string }
+              hint: { type: string }
+        auditResult:
+          $ref: '#/components/schemas/HumanizeAudit'
+        tokensUsed: { type: integer }
+        rounds: { type: integer }
+        ppl: { type: number, description: 该段最终输出文本的困惑度(ai-service 不可用时省略) }
+        pplBurstiness: { type: number, description: 突发性(句长方差) }
+        pplPassed: { type: boolean, description: PPL 是否通过(≥ 35) }
+        pplFailed: { type: boolean, description: PPL 失败标记(需人工干预) }
+        pplAvailable: { type: boolean, description: ai-service 是否可用 }
+
+    HumanizeAudit:
+      type: object
+      properties:
+        dashResidual: { type: integer, description: 破折号残留(目标 0) }
+        aiVocabPer1k: { type: number, description: AI 口癖词每千字(目标 < 3) }
+        sentenceLengthSigma: { type: number, description: 句长变异系数(目标 > 0.45) }
+        passed: { type: boolean }
+        failedReasons:
+          type: array
+          items: { type: string }
+
+    HumanizeSummary:
+      type: object
+      properties:
+        totalParagraphs: { type: integer }
+        totalTokensUsed: { type: integer }
+        totalRounds: { type: integer }
+        overallPassed: { type: boolean }
+        promptVersion: { type: string }
+        scenario: { type: string }
+        processingMs: { type: integer }
+        avgPpl: { type: number, description: 平均 PPL(ai-service 不可用时省略) }
+        pplPassRate: { type: number, description: PPL 通过率 0-1 }
+        hasPplFailure: { type: boolean, description: 是否有段 PPL 失败(需人工干预) }
+
+    HumanizeBeforeAfter:
+      type: object
+      properties:
+        dashCount:
+          type: object
+          properties:
+            before: { type: integer }
+            after: { type: integer }
+        aiVocabCount:
+          type: object
+          properties:
+            before: { type: integer }
+            after: { type: integer }
+        templateConnectorCount:
+          type: object
+          properties:
+            before: { type: integer }
+            after: { type: integer }
+        firstPersonDensity:
+          type: object
+          properties:
+            before: { type: integer }
+            after: { type: integer }
