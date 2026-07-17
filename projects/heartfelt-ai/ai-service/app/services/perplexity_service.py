@@ -15,9 +15,7 @@ import logging
 import math
 import re
 from functools import lru_cache
-
-import torch
-from transformers import GPT2LMHeadModel, BertTokenizer
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -25,15 +23,29 @@ MODEL_NAME = "uer/gpt2-chinese-cluecorpussmall"
 
 # 全局模型实例(在 lifespan 里加载一次)
 # 注意:uer/gpt2-chinese 系列用 BertTokenizer(全字符级),不是 GPT2 BPE
-_tokenizer: BertTokenizer | None = None
-_model: GPT2LMHeadModel | None = None
+# 类型用 Any - torch/transformers 是可选依赖,骨架期可能未装
+_tokenizer: Any = None
+_model: Any = None
 
 
 def load_model() -> None:
-    """加载 GPT-2 中文模型。在 FastAPI lifespan 启动时调用一次。"""
+    """加载 GPT-2 中文模型。在 FastAPI lifespan 启动时调用一次。
+
+    torch / transformers 为可选依赖(pyproject.toml [embed] extras),
+    骨架期可能未安装。导入放在函数内,失败时由 lifespan 容错捕获,
+    保证服务主流程(健康检查等)可正常启动。
+    """
     global _tokenizer, _model
     if _model is not None:
         return
+    try:
+        import torch  # noqa: F401
+        from transformers import GPT2LMHeadModel, BertTokenizer
+    except ImportError as e:
+        raise RuntimeError(
+            f"torch/transformers 未安装 - 请运行 `uv sync --extra embed`。原因: {e}"
+        ) from e
+
     logger.info("Loading %s ...", MODEL_NAME)
     # 关键:uer/gpt2-chinese 用 BertTokenizer,不是 GPT2Tokenizer
     _tokenizer = BertTokenizer.from_pretrained(MODEL_NAME)
@@ -64,6 +76,8 @@ def calc_ppl(text: str) -> dict:
     """
     if not is_model_loaded():
         raise RuntimeError("GPT-2 模型未加载,请检查 lifespan 启动日志")
+
+    import torch  # 局部导入:与 load_model 保持一致的懒加载策略
 
     # 1. 困惑度 PPL = exp(-1/N Σ log P(word_i | context))
     inputs = _tokenizer(

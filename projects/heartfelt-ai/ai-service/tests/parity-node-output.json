@@ -1,0 +1,114 @@
+[
+  {
+    "name": "short_clean",
+    "text": "今天天气不错。",
+    "text_length": 7,
+    "metrics": {
+      "dash_residual": 0,
+      "ai_vocab_per_1k": 0,
+      "sentence_length_sigma": 1,
+      "passed": true,
+      "failed_reasons": [],
+      "retry_hint": null
+    }
+  },
+  {
+    "name": "with_dashes",
+    "text": "人工智能在教育领域的应用非常广泛—并且取得了显著成效。此外—研究者发现学生们对 AI 工具的接受度逐年上升。",
+    "text_length": 54,
+    "metrics": {
+      "dash_residual": 2,
+      "ai_vocab_per_1k": 18.51851851851852,
+      "sentence_length_sigma": 1,
+      "passed": false,
+      "failed_reasons": [
+        "破折号残留 2 处(必须为 0)",
+        "AI 口癖词 18.5/千字(目标 < 3)"
+      ],
+      "retry_hint": "破折号残留 2 处(必须为 0); AI 口癖词 18.5/千字(目标 < 3)"
+    }
+  },
+  {
+    "name": "academic_ai",
+    "text": "首先,人工智能技术的发展为教育领域带来了重要的变革。其次,AI 工具能够显著提升教学效率,助力个性化学习。此外,研究表明智能辅导系统对学生成绩有显著影响。最后,综上所述,人工智能在教育领域具有重要的意义。",
+    "text_length": 102,
+    "metrics": {
+      "dash_residual": 0,
+      "ai_vocab_per_1k": 68.62745098039217,
+      "sentence_length_sigma": 0.04563404035713857,
+      "passed": false,
+      "failed_reasons": [
+        "AI 口癖词 68.6/千字(目标 < 3)",
+        "句长变异系数 0.05(目标 > 0.45)"
+      ],
+      "retry_hint": "AI 口癖词 68.6/千字(目标 < 3); 句长变异系数 0.05(目标 > 0.45)"
+    }
+  },
+  {
+    "name": "marketing_ai",
+    "text": "本产品通过 AI 赋能,打造全方位的学习闭环。多维度分析学习数据,助力学生提升成绩。我们的解决方案具有不可磨灭的重要意义,助力教育行业革命性升级。",
+    "text_length": 73,
+    "metrics": {
+      "dash_residual": 0,
+      "ai_vocab_per_1k": 123.2876712328767,
+      "sentence_length_sigma": 1,
+      "passed": false,
+      "failed_reasons": [
+        "AI 口癖词 123.3/千字(目标 < 3)"
+      ],
+      "retry_hint": "AI 口癖词 123.3/千字(目标 < 3)"
+    }
+  },
+  {
+    "name": "human_like",
+    "text": "教室里很吵。孩子们挤在窗口往外看,有人踮脚,有人蹲下。外面在下雨。我站在门口,听着他们七嘴八舌地讨论明天的春游要不要改期。其实这事我也拿不准。天气预报说有雷阵雨,但谁知道呢?上次说下雨结果晴了一整天。我让他们先回座位,等会儿问问家长群。",
+    "text_length": 118,
+    "metrics": {
+      "dash_residual": 0,
+      "ai_vocab_per_1k": 0,
+      "sentence_length_sigma": 0.5177829405781142,
+      "passed": true,
+      "failed_reasons": [],
+      "retry_hint": null
+    }
+  },
+  {
+    "name": "empty",
+    "text": "",
+    "text_length": 0,
+    "metrics": {
+      "dash_residual": 0,
+      "ai_vocab_per_1k": 0,
+      "sentence_length_sigma": 1,
+      "passed": true,
+      "failed_reasons": [],
+      "retry_hint": null
+    }
+  },
+  {
+    "name": "ai_variant",
+    "text": "研究表明,该方法显著提升了效率。",
+    "text_length": 16,
+    "metrics": {
+      "dash_residual": 0,
+      "ai_vocab_per_1k": 0,
+      "sentence_length_sigma": 1,
+      "passed": true,
+      "failed_reasons": [],
+      "retry_hint": null
+    }
+  },
+  {
+    "name": "human_variant",
+    "text": "效率这东西,我们试下来确实是涨了。",
+    "text_length": 17,
+    "metrics": {
+      "dash_residual": 0,
+      "ai_vocab_per_1k": 0,
+      "sentence_length_sigma": 1,
+      "passed": true,
+      "failed_reasons": [],
+      "retry_hint": null
+    }
+  }
+]

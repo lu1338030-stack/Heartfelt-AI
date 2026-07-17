@@ -10,7 +10,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
-from app.routers import health, perplexity
+from app.routers import analyze, health, perplexity
 from app.services.perplexity_service import load_model as load_gpt2
 
 logging.basicConfig(
@@ -64,6 +64,7 @@ app.add_middleware(
 # 路由注册
 app.include_router(health.router, prefix="/health", tags=["health"])
 app.include_router(perplexity.router, prefix="/perplexity", tags=["perplexity"])
+app.include_router(analyze.router, prefix="/analyze", tags=["analyze"])
 
 # 后续业务路由(v1+)
 # from app.routers import embed, detect_ai, semantic_search
