@@ -9,7 +9,7 @@ import { InjectRepository } from '@nestjs/typeorm'
 import { Repository } from 'typeorm'
 import { Paper } from '../entities/paper.entity'
 import { StorageService } from '../storage/storage.service'
-import { AiServiceClient } from '../ai-service/ai-service.client'
+import { AiServiceClient, AnalyzeResponse } from '../ai-service/ai-service.client'
 import { segment, Paragraph } from './lib/segment'
 import {
   runRuleEngine,
@@ -105,9 +105,10 @@ export class HumanizeService {
     }
 
     // 4. 并行处理每一段(三阶段 + 自检闭环)
+    const personalContext = dto.personalContext
     const paragraphResults = await Promise.all(
       paragraphs.map(para =>
-        this.processParagraph(para, scenario, maxRetries).catch(err => {
+        this.processParagraph(para, scenario, maxRetries, personalContext).catch(err => {
           // 单段失败不阻塞整体,返回带 error 标记的结果
           this.logger.error(
             `段落 ${para.index} 处理失败: ${(err as Error).message}`,
@@ -189,17 +190,60 @@ export class HumanizeService {
     para: Paragraph,
     scenario: Scenario,
     maxRetries: number,
+    personalContext?: string,
   ): Promise<HumanizeParagraphResultDto> {
-    // 阶段 1:规则引擎
-    const ruleResult: RuleEngineResult = runRuleEngine(para.text)
-    const flaggedHints = extractFlaggedHints(ruleResult.flags)
+    // 阶段 1:预处理 - 优先走 Python /analyze(Node 兜底)
+    //
+    // Phase 5 重构(见 plan/refactor-python-llm-hybrid.md):
+    //   - 优先调 ai-service 的 /analyze,一次性完成:
+    //     规则引擎 + jieba 词级替换 + 自检指标 + LLM 精准 hint
+    //   - Python 不可用时降级到 Node 的 rule-engine + audit-loop
+    //
+    // 保留 Node 实现是为了:
+    //   1. 兜底(Python 服务挂了不影响业务)
+    //   2. 平滑迁移(对比测试期可同时跑两套)
+    let preprocessedText: string
+    let flaggedHints: string[]
+    let pythonAnalyze: AnalyzeResponse | undefined
+
+    try {
+      pythonAnalyze = await this.aiService.analyze(para.text, {
+        scenario,
+        doPreprocess: true,
+        doVocabReplace: true,
+        doPpl: false, // 预处理阶段不查 PPL,后续每轮再查
+      })
+      preprocessedText = pythonAnalyze.preprocessed_text
+      // 优先用 Python 生成的精准 hint(句子级 + 词汇级)
+      // 不只是 flagged 的 hint
+      flaggedHints = [
+        ...pythonAnalyze.llm_hints.text_hints,
+        ...pythonAnalyze.llm_hints.sentence_hints,
+        ...pythonAnalyze.llm_hints.vocab_hints,
+      ]
+      this.logger.debug(
+        `段落 ${para.index} 走 Python /analyze 预处理: ` +
+          `rules=${pythonAnalyze.rule_hits.length} ` +
+          `flags=${pythonAnalyze.flags.length} ` +
+          `hints=${flaggedHints.length} ` +
+          `vocab_replaced=${pythonAnalyze.vocab_replace?.replacements.length ?? 0}`,
+      )
+    } catch (e) {
+      // 兜底:Python 不可用,走 Node 旧逻辑
+      this.logger.warn(
+        `Python /analyze 失败,降级到 Node rule-engine: ${(e as Error).message}`,
+      )
+      const ruleResult: RuleEngineResult = runRuleEngine(para.text)
+      preprocessedText = ruleResult.preprocessedText
+      flaggedHints = extractFlaggedHints(ruleResult.flags)
+    }
 
     // 阶段 2 + 3:LLM 重写 + 自检闭环
     // PPL 反馈循环(见 plan/ppl-feedback-loop.md):
     //   - Node 自检通过后,再调 PPL 检查
     //   - PPL 不达标 → 把 PPL 反馈塞进 retryHint 让 LLM 重写
     //   - 跨轮追踪 PPL 最高的版本(Best-of-N 模式,见 librarian 调研)
-    let currentText = ruleResult.preprocessedText
+    let currentText = preprocessedText
     let llmResult: RewriteOutput | undefined
     let auditResult: AuditOutput | undefined
     let pplCheck: PplCheckOutput | undefined
@@ -244,6 +288,7 @@ export class HumanizeService {
         scenario,
         flaggedHints,
         retryHint,
+        personalContext,
         config: this.llmConfig,
       })
 
@@ -332,17 +377,30 @@ export class HumanizeService {
     return {
       index: para.index,
       originalText: para.text,
-      preprocessedText: ruleResult.preprocessedText,
+      preprocessedText: preprocessedText,
       rewrittenText: finalLlm.content,
-      ruleHits: ruleResult.hits.map(h => ({
-        ruleId: h.ruleId,
-        count: h.count,
-        reason: h.reason,
-      })),
-      flaggedPatterns: ruleResult.flags.map(f => ({
-        patternName: f.patternName,
-        hint: f.hint,
-      })),
+      // Python 路径用 pythonAnalyze 的数据,Node 兜底用 ruleResult
+      // 注:DTO 字段名保持不变(前端兼容)
+      ruleHits: pythonAnalyze
+        ? pythonAnalyze.rule_hits.map(h => ({
+            ruleId: h.rule_id,
+            count: h.count,
+            reason: h.reason,
+          }))
+        : runRuleEngine(para.text).hits.map(h => ({
+            ruleId: h.ruleId,
+            count: h.count,
+            reason: h.reason,
+          })),
+      flaggedPatterns: pythonAnalyze
+        ? pythonAnalyze.flags.map(f => ({
+            patternName: f.pattern_name,
+            hint: f.hint,
+          }))
+        : runRuleEngine(para.text).flags.map(f => ({
+            patternName: f.patternName,
+            hint: f.hint,
+          })),
       auditResult: this.auditToDto(finalAudit),
       tokensUsed: finalLlm.tokensUsed,
       rounds,

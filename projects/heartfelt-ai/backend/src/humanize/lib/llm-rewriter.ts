@@ -27,6 +27,11 @@ export interface RewriteInput {
   flaggedHints?: string[]
   /** 重试时带上的"上次哪里没过"(来自 audit-loop) */
   retryHint?: string
+  /**
+   * 个性化上下文(Grok 6 维度方案维度 5,prompt v1.2.0+)
+   * 透传给 buildSystemPrompt 的 Layer 8。为空时该层不注入。
+   */
+  personalContext?: string
   /** LLM 配置(由 service 注入,避免直接读 process.env) */
   config: LlmConfig
 }
@@ -91,6 +96,7 @@ export async function rewrite(input: RewriteInput): Promise<RewriteOutput> {
   const systemPrompt = buildSystemPrompt({
     scenario: input.scenario,
     flaggedHints: input.flaggedHints,
+    personalContext: input.personalContext,
   })
 
   // 组装 user message

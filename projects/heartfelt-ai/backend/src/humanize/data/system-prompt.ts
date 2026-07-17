@@ -19,6 +19,14 @@
  * Prompt 版本号
  * 调优 prompt 时 +1,写入 humanize_iterations 表便于 A/B 对比
  *
+ * 1.2.0 (2025-07):新增 Layer 8 内容个性化注入(对应 Grok 6 维度方案维度 5)
+ *   - 之前 7 层全部解决"形式上的 AI 味"(破折号/三段式/高频词/句长均匀)
+ *   - 维度 5"内容个性化"是 Grok 6 维度里最缺失的一环:
+ *     AI 文本往往"哪都对但读起来空洞",因为没有作者的私人锚点
+ *   - 新增可选层:接收用户的 personalContext(背景/身份/经验/立场)
+ *     把它编织进改写,让文本带上作者独有的视角和经验痕迹
+ *   - personalContext 为空时该层完全不注入,行为同 1.1.1(向后兼容)
+ *
  * 1.1.1 (2025-07):新增"保持原文格式结构"硬约束
  *   - 用户反馈:模型把"优势: A; B; C 局限性: D; E"这种结构标签
  *     抹掉换成连贯叙述("不过 D...另外 E..."),破坏了原文框架
@@ -31,7 +39,7 @@
  *   - Layer 5: 5 项输出前自检
  *   - Layer 6: 输出格式约束
  */
-export const PROMPT_VERSION = '1.1.1'
+export const PROMPT_VERSION = '1.2.0'
 
 // ===== 类型 =====
 
@@ -41,6 +49,21 @@ export interface BuildPromptOptions {
   scenario: Scenario
   /** 来自规则引擎的 flagged 标记(hint 字符串数组) */
   flaggedHints?: string[]
+  /**
+   * 用户的个性化上下文(Grok 6 维度方案维度 5:内容个性化)
+   *
+   * 可选。用户提供的一段自由文本,描述作者本人的:
+   *   - 身份背景("我是北师大教育学研三在读,做 K12 课堂观察")
+   *   - 研究立场("倾向于批判性视角,不轻信厂商宣传")
+   *   - 个人经验("我在三个乡村小学做过 6 个月田野调查")
+   *   - 写作偏好("习惯用'我们看到'而不是'研究表明'")
+   *
+   * Layer 8 会把它编织进改写,让文本带上作者独有的视角痕迹,
+   * 解决"形式都对但读起来空洞"这一 AI 文本顽疾。
+   *
+   * 为空时 Layer 8 不注入,行为完全等同 v1.1.1(向后兼容)。
+   */
+  personalContext?: string
 }
 
 // ===== 主函数 =====
@@ -54,6 +77,7 @@ export function buildSystemPrompt(opts: BuildPromptOptions): string {
     layer5_detection_guard(),
     layer6_output_contract(),
     layer7_flagged_hints(opts.flaggedHints),
+    layer8_personal_context(opts.personalContext),
   ].filter(l => l.length > 0) // 过滤空层
 
   return layers.join('\n\n---\n\n')
@@ -277,6 +301,60 @@ function layer6_output_contract(): string {
 
 破折号(— – ——)在最终输出里**必须为 0**。这是硬约束。
 如果你在 reasoning 里发现自己还想用破折号,改用逗号或句号。`
+}
+
+// ===== 第 8 层:内容个性化注入(Grok 维度 5) =====
+
+/**
+ * 把用户的 personalContext 编织进改写指令。
+ *
+ * 为空时返回空字符串(buildSystemPrompt 会过滤掉),完全不影响旧行为。
+ *
+ * 设计要点:
+ *   - 强调"编织"而不是"拼接":不要在文末贴一段"我是 XX",而是
+ *     让作者的视角渗透进每句话的措辞和侧重
+ *   - 明确界限:个性化 ≠ 篡改原文论点。原文有几个论点仍几个论点,
+ *     但每个论点可以带上作者的私人锚点("在我的田野观察中..."这种)
+ *   - 防止过载:作者身份信息只用 1-2 处体现,不要每句都自报家门
+ *   - 兼容所有 scenario:academic 时仍要克制(用"笔者""本研究"),
+ *     blog/opinion 时可以更直接的第一人称
+ */
+function layer8_personal_context(personalContext?: string): string {
+  if (!personalContext || personalContext.trim().length === 0) return ''
+
+  // 限长防滥用(prompt 膨胀会拖慢 LLM 且增加成本)
+  const ctx = personalContext.trim().slice(0, 500)
+
+  return `## 内容个性化注入(作者视角编织,对应 Grok 6 维度方案维度 5)
+
+以下是作者本人的背景/立场/经验,你必须在改写中体现这种个人视角:
+
+"""
+${ctx}
+"""
+
+### 编织要求(关键)
+
+1. **渗透式表达**:不要在文末或开头贴一段自我介绍。让作者身份渗透进
+   论据的措辞和侧重——例如原文说"研究表明 X",若作者做过相关田野,
+   改写可以变成"X 这一现象,在笔者的观察中也清晰可见"。
+
+2. **保留原文论点数量和核心结论**:个性化是改变"怎么说",不是改变
+   "说什么"。原文 3 个论点改写后仍 3 个,结论不变,只是带上作者视角。
+
+3. **克制使用**:全文最多 1-2 处明显的作者锚点(如"笔者的观察""本研究
+   在 X 中注意到")。不要每段都自报家门,否则反而像 AI 模仿人类。
+
+4. **场景适配**:
+   - academic:用"笔者""本研究",保持正式
+   - blog:可以用"我",更自然
+   - opinion:明确个人判断,"笔者认为 X"
+
+5. **作者偏好优先**:如果作者指定了写作偏好(如"用'我们看到'而非
+   '研究表明'"),在不破坏学术性的前提下尽量采纳。
+
+6. **不要捏造**:personalContext 里没有的事实,绝对不要编造进文本。
+   只用作者明确给出的信息。`
 }
 
 // ===== 第 7 层:本段特定提示(动态注入) =====

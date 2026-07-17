@@ -44,6 +44,19 @@ export class HumanizeRequestDto {
   @Min(0)
   @Max(5)
   maxRetries?: number
+
+  /**
+   * 个性化上下文(Grok 6 维度方案维度 5:内容个性化,prompt v1.2.0+)
+   *
+   * 可选。作者本人的背景/立场/经验/写作偏好,会被 Layer 8 编织进改写,
+   * 让文本带上作者独有的视角痕迹,解决"形式都对但读起来空洞"这一顽疾。
+   *
+   * 不传时行为完全等同 v1.1.1(向后兼容)。
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  personalContext?: string
 }
 
 // ===== 响应 DTO =====
